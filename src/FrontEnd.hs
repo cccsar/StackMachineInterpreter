@@ -1,13 +1,33 @@
 module FrontEnd where
 
-import Constants
-import Error
+import Constants (startMessage, exitMessage, initialize, askForFile)
+import Error ( Error(InvalidInput) )
+import Utility ( isBool, isNum, isLabel, request, warning)
 
 import BackEnd
-import Data.Char (isDigit)
-import System.IO
+    ( insertLabel,
+      insertInstruction,
+      StackContent(Int, Bool),
+      Instruction(Print, Read, GoFalse, GoTrue, Goto, Assign, Lvalue,
+                  Rvalue, Not, Uminus, Neq, Eq, Ge, Gt, Le, Lt, Or, And, Div, Mul,
+                  Sub, Add, Pop, Push),
+      StackMachine,
+      initialSM )
 
-import qualified Data.Map as M
+
+startPoint :: IO () 
+startPoint = do 
+    putStr initialize
+    putStrLn startMessage
+    file    <- request askForFile
+    content <- readFile file
+
+    result <- parse initialSM 0 (words content)
+
+    case result of
+        Left err     -> warning (show err)
+        Right stackM -> do putStrLn exitMessage
+                           print (show stackM)
 
 parse :: StackMachine -> Int -> [String] -> IO (Either Error StackMachine)
 parse stackM n [] = return $ Right stackM 
@@ -36,45 +56,9 @@ parse stackM n xs = case xs of
     ("Goto":label:xs)     -> parse (insertInstruction stackM (Goto label)) (n+1) xs
     ("GoTrue":label:xs)   -> parse (insertInstruction stackM (GoTrue label)) (n+1) xs
     ("GoFalse":label:xs)  -> parse (insertInstruction stackM (GoFalse label)) (n+1) xs
-    ("Read":idS:xs)       -> do
-        input <- request idRequest
-        if isBool input 
-            then let newStackM = insertId stackM idS (Bool (read input :: Bool)) 
-                 in parse (insertInstruction newStackM _) (n+1) xs
-            else if isNum input 
-                then let newStackM = insertId stackM idS (Int (read input :: Int)) 
-                     in parse (insertInstruction newStackM _) (n+1) xs
-                else return $ Left $ InvalidInput idS
-    ("Print":idS:xs)      -> case M.lookup idS (environment stackM) of
-            Just val -> print val >> parse (insertInstruction stackM _) (n+1) xs
-            Nothing  -> return $ Left $ IdNotFound idS
+    ("Read":idS:xs)       -> parse (insertInstruction stackM (Read idS)) (n+1) xs
+    ("Print":idS:xs)      -> parse (insertInstruction stackM (Print idS)) (n+1) xs
     (maybeLabel:xs)       
         | isLabel maybeLabel -> parse (insertLabel stackM maybeLabel n) (n+1) xs
         | otherwise          -> return $ Left $ InvalidInput maybeLabel
-    _                     -> undefined
-
-{- Display -}
-
-prompt :: IO () 
-prompt = putStr promptStr
-
-request :: String -> IO String 
-request msg = do 
-    prompt 
-    putStr msg
-    hFlush stdout 
-    getLine
-
-warning :: String -> IO () 
-warning msg = prompt >> putStrLn msg
-
-{- Helpers -}
-
-isBool :: String -> Bool 
-isBool el = el `elem` ["true","false"]
-
-isNum :: String -> Bool
-isNum = all isDigit
-
-isLabel :: String -> Bool 
-isLabel = (==':') . last
+    _                     -> error "It shouldn't arrive here"

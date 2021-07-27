@@ -1,3 +1,5 @@
 module Main where
 
-main = undefined
+import FrontEnd
+
+main = startPoint
