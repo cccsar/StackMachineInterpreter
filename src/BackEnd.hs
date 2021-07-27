@@ -4,6 +4,7 @@ import Error
 
 import Control.Monad (foldM)
 import Data.Maybe (fromJust)
+import Data.List(foldl')
 
 import qualified Data.Map as M
 
@@ -35,6 +36,9 @@ data Instruction
     | Goto Label
     | GoTrue Label
     | GoFalse Label 
+
+    | Read String 
+    | Print String
     deriving Show
 
 
@@ -174,7 +178,13 @@ performInstruction stackM instruction = case instruction of
                         Just startPoint -> do
                                 let instrSize  = length (ledge stackM) - startPoint + 1
                                     instrBlock = reverse $ take startPoint (ledge stackM)
-                                a <- foldM performInstruction stackM instrBlock
+                                foldl' (\acc b -> do
+                                        extracted <- acc 
+                                        case extracted of 
+                                            Left err        -> return $ Left err 
+                                            Right newStackM -> do
+                                                performInstruction newStackM b
+                                        ) (return $ Right stackM) instrBlock
                         Nothing      -> return $ Left $ LabelNotFound label
     (GoTrue label)  -> case state stackM of
                         (Bool True : _) -> performInstruction stackM (Goto label)
@@ -184,6 +194,8 @@ performInstruction stackM instruction = case instruction of
                         (Bool False : _) -> performInstruction stackM (Goto label)
                         (a : _ )         -> return $ Left InvalidTopForJump 
                         []               -> return $ Left EmptyState
+    (Read idS)      -> undefined
+    (Print idS)     -> undefined 
 
 isLvalue :: StackContent -> Bool 
 isLvalue (Id _) = True 
