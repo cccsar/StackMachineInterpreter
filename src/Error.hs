@@ -1,9 +1,18 @@
 module Error where
 
 data Error 
-    = InvalidType 
-    | NotEnoughElements
-    | UnknownIdentifier String
-    | NonAssignedIdentifier
+    = EmptyPop 
+    | InvalidOpTypes 
+    | EmptyStack
 
+    | IdNotFound String
+
+    | UnassignableElement
+    | EmptyState
+
+    | LabelNotFound String
+
+    | InvalidTopForJump 
+
+    | InvalidInput String
     deriving Eq
