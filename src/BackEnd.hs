@@ -1,12 +1,19 @@
 module BackEnd where
 
-import Constants
-import Error
-import Utility
-
 import Control.Monad (foldM)
 import Data.Maybe (fromJust)
-import Data.List(foldl', intersperse)
+import Data.List(foldl', intercalate)
+import System.Exit (exitSuccess)
+
+import Constants ( exitMessage, idRequest )
+import Error
+    ( Error(InvalidInput, InvalidTopForJump, LabelNotFound,
+            IncompleteState, InvalidLValue, InvalidRValue, IdNotFound,
+            InvalidUnOpTypes, InsufficientArguments, InvalidBinOpTypes,
+            EmptyPop) )
+import Utility ( request, isNum, isBool, toHaskellBool, warning)
+
+
 
 import qualified Data.Map as M
 
@@ -40,8 +47,9 @@ data Instruction
 
     | Read String 
     | Print String
-    deriving Show
 
+    | Exit
+    deriving Show
 
 data StackContent 
     = Int Int 
@@ -64,84 +72,90 @@ data StackMachine = StackMachine {
 }
 
 instance Show StackMachine where
-    show stackM = "*State: " ++ stateShow
-                  ++ "\n*Exisiting bindings " ++ environmentShow  
+    show stackM = "*State: " ++ stateShow (state stackM)
+                  ++ "\n*Bindings: " ++ environmentShow (M.toList $ environment stackM)
         where
-        stateShow = unwords . map show $ state stackM 
-        environmentShow = concatMap (\(a,b) -> a ++ " : " ++ show b) . M.toList $ environment stackM
+        stateShow [] = "empty stack"
+        stateShow xs = unwords . map show $ xs
+
+        environmentShow [] = "empty environment"
+        environmentShow xs = intercalate "," . map (\(a,b) -> ' ' : a ++ " : " ++ show b) $ xs
 
 {- API for State Stack -}
 
 stackOperations = [add, sub, mul, divS, andS, orS, lt, gt, ge, eq, neq, uminus, notS]
 
-pop, add, sub, mul, divS, andS, orS, lt, le, gt, ge, eq, neq, uminus, notS :: Stack -> Either Error Stack
+pop, add, sub, mul, divS, andS, orS, lt, le, gt, ge, eq, neq, uminus, notS :: Stack -> IO Stack
 
 
-pop []     = Left EmptyPop
-pop (_:xs) = Right xs
+pop []     = reportError EmptyPop >> return []
+pop (_:xs) = return xs
 
-add (Int a : Int b : xs) = Right $ Int (a + b) : xs
-add (_ : _ : xs )        = Left $ InvalidBinOpTypes "ADD"
-add _                    = Left EmptyStack
+add (Int a : Int b : xs) = return $ Int (a + b) : xs
+add a@(_ : _ : xs )      = reportError (InvalidBinOpTypes "ADD") >> return a
+add xs                   = reportError (InsufficientArguments "ADD" 2 $ length xs) >> return xs
 
-sub (Int a : Int b : xs) = Right $ Int (a - b) : xs
-sub (_ : _ : xs)         = Left $ InvalidBinOpTypes "SUB"
-sub _                    = Left EmptyStack
+sub (Int b : Int a : xs) = return $ Int (a - b) : xs
+sub a@(_ : _ : xs)       = reportError (InvalidBinOpTypes "SUB") >> return xs
+sub xs                   = reportError (InsufficientArguments "SUB" 2 $ length xs) >> return xs
 
-mul (Int a : Int b : xs) = Right $ Int (a * b) : xs
-mul (_ : _ : xs)         = Left $ InvalidBinOpTypes "MUL"
-mul _                    = Left EmptyStack
+mul (Int a : Int b : xs) = return $ Int (a * b) : xs
+mul a@(_ : _ : xs)       = reportError (InvalidBinOpTypes "MUL") >> return a
+mul xs                   = reportError (InsufficientArguments "MUL" 2 $ length xs) >> return xs
 
-divS (Int a : Int b : xs) = Right $ Int (a `div` b) : xs
-divS (_ : _ : xs)         = Left $ InvalidBinOpTypes "DIV"
-divS _                    = Left EmptyStack
+divS (Int b : Int a : xs) = return $ Int (a `div` b) : xs
+divS a@(_ : _ : xs)       = reportError (InvalidBinOpTypes "DIV") >> return a
+divS xs                   = reportError (InsufficientArguments "DIV" 2 $ length xs) >> return xs
 
-andS (Bool a : Bool b : xs) = Right $ Bool (a && b) : xs
-andS (_ : _ : xs)           = Left $ InvalidBinOpTypes "AND"
-andS _                      = Left EmptyStack
+andS (Bool a : Bool b : xs) = return $ Bool (a && b) : xs
+andS a@(_ : _ : xs)         = reportError (InvalidBinOpTypes "AND") >> return a
+andS xs                     = reportError (InsufficientArguments "AND" 2 $ length xs) >> return xs 
 
-orS (Bool a : Bool b : xs) = Right $ Bool (a || b) : xs
-orS (_ : _ : xs)           = Left $ InvalidBinOpTypes "OR"
-orS _                      = Left EmptyStack
+orS (Bool a : Bool b : xs) = return $ Bool (a || b) : xs
+orS a@(_ : _ : xs)         = reportError (InvalidBinOpTypes "OR") >> return a
+orS xs                     = reportError (InsufficientArguments "OR" 2 $ length xs) >> return xs 
 
-lt (Int a : Int b : xs) = Right $ Bool (a < b) : xs
-lt (_ : _ : xs)         = Left $ InvalidBinOpTypes "LT"
-lt _                    = Left EmptyStack
+lt (Int b : Int a : xs) = return $ Bool (a < b) : xs
+lt a@(_ : _ : xs)       = reportError (InvalidBinOpTypes "LT") >> return a
+lt xs                   = reportError (InsufficientArguments "LT" 2 $ length xs) >> return xs 
 
-le (Int a : Int b : xs) = Right $ Bool (a <= b) : xs
-le (_ : _ : xs)         = Left $ InvalidBinOpTypes "LE"
-le _                    = Left EmptyStack
+le (Int b : Int a : xs) = return $ Bool (a <= b) : xs
+le a@(_ : _ : xs)       = reportError (InvalidBinOpTypes "LE") >> return a
+le xs                   = reportError (InsufficientArguments "LE" 2 $ length xs) >> return xs 
 
-gt (Int a : Int b : xs) = Right $ Bool (a > b) : xs
-gt (_ : _ : xs)         = Left $ InvalidBinOpTypes "GT"
-gt _                    = Left EmptyStack
+gt (Int b : Int a : xs) = return $ Bool (a > b) : xs
+gt a@(_ : _ : xs)       = reportError (InvalidBinOpTypes "GT") >> return a
+gt xs                   = reportError (InsufficientArguments "GT" 2 $ length xs) >> return xs 
 
-ge (Int a : Int b : xs) = Right $ Bool (a >= b) : xs
-ge (_ : _ : xs)         = Left $ InvalidBinOpTypes "GE"
-ge _                    = Left EmptyStack
+ge (Int b : Int a : xs) = return $ Bool (a >= b) : xs
+ge a@(_ : _ : xs)       = reportError (InvalidBinOpTypes "GE") >> return a
+ge xs                   = reportError (InsufficientArguments "GE" 2 $ length xs) >> return xs 
 
-eq (Int a : Int b : xs)   = Right $ Bool (a==b) : xs
-eq (Bool a : Bool b : xs) = Right $ Bool (a==b) : xs
-eq (_ : _ : xs)           = Left $ InvalidBinOpTypes "EQ"
-eq _                      = Left EmptyStack
+eq (Int a : Int b : xs)   = return $ Bool (a==b) : xs
+eq (Bool a : Bool b : xs) = return $ Bool (a==b) : xs
+eq a@(_ : _ : xs)         = reportError (InvalidBinOpTypes "EQ") >> return a 
+eq xs                     = reportError (InsufficientArguments "EQ" 2 $ length xs) >> return xs  
 
-neq (Int a : Int b : xs)   = Right $ Bool (a/=b) : xs
-neq (Bool a : Bool b : xs) = Right $ Bool (a/=b) : xs
-neq (_ : _ : xs)           = Left $ InvalidBinOpTypes "NEQ"
-neq _                      = Left EmptyStack
+neq (Int a : Int b : xs)   = return $ Bool (a/=b) : xs
+neq (Bool a : Bool b : xs) = return $ Bool (a/=b) : xs
+neq a@(_ : _ : xs)         = reportError (InvalidBinOpTypes "NEQ") >> return a
+neq xs                     = reportError (InsufficientArguments "NEQ" 2 $ length xs) >> return xs  
 
-uminus (Int a : xs) = Right $ Int (-a) : xs
-uminus []           = Left EmptyStack 
-uminus _            = Left $ InvalidUnOpTypes "UMINUS"
+uminus (Int a : xs) = return $ Int (-a) : xs
+uminus []           = reportError (InsufficientArguments "UMINUS" 1 0) >> return []
+uminus xs           = reportError (InvalidUnOpTypes "UMINUS") >> return xs
 
-notS (Bool a : xs) = Right $ Bool (not a) : xs
-notS []            = Left EmptyStack 
-notS _             = Left $ InvalidUnOpTypes "NOT"
+notS (Bool a : xs) = return $ Bool (not a) : xs
+notS []            = reportError (InsufficientArguments "NOT" 1 0) >> return [] 
+notS xs            = reportError (InvalidUnOpTypes "NOT") >> return xs
 
 {- Stack Machine Specific's -}
 
 pushSM :: StackMachine -> StackContent -> StackMachine
 pushSM stackM el = stackM { state = el : state stackM }
+
+popSM :: StackMachine -> StackMachine
+popSM stackM = stackM { state = tail $ state stackM}
 
 insertInstruction :: StackMachine -> Instruction -> StackMachine
 insertInstruction stackM instruction = stackM { ledge = instruction : ledge stackM }
@@ -150,76 +164,94 @@ insertLabel :: StackMachine -> Label -> Int -> StackMachine
 insertLabel stackM label ind = stackM { labels = M.insert label ind (labels stackM) } 
 
 insertId :: StackMachine -> Id -> StackContent -> StackMachine
-insertId stackM idS val = stackM { environment = M.insert idS val (environment stackM ) }
+insertId stackM idS val = stackM { environment = M.insert idS val (environment stackM) }
 
-performOperation :: StackMachine -> (Stack -> Either Error Stack) -> Either Error StackMachine
+performOperation :: StackMachine -> (Stack -> IO Stack) -> IO StackMachine
 performOperation stackM op = do
     newState <- op $ state stackM
     return $ stackM { state = newState }
 
-performInstruction :: StackMachine -> Instruction -> IO (Either Error StackMachine)
-performInstruction stackM instruction = case instruction of
-    Push el         -> return $ Right $ pushSM stackM el
-    Pop             -> return $ performOperation stackM pop
-    Add             -> return $ performOperation stackM add
-    Sub             -> return $ performOperation stackM sub
-    Mul             -> return $ performOperation stackM mul
-    Div             -> return $ performOperation stackM divS
-    And             -> return $ performOperation stackM andS
-    Or              -> return $ performOperation stackM orS
-    Lt              -> return $ performOperation stackM lt
-    Le              -> return $ performOperation stackM le
-    Gt              -> return $ performOperation stackM gt
-    Ge              -> return $ performOperation stackM ge
-    Eq              -> return $ performOperation stackM eq
-    Neq             -> return $ performOperation stackM neq
-    Uminus          -> return $ performOperation stackM uminus
-    Not             -> return $ performOperation stackM notS
-    (Rvalue sId)    -> case M.lookup sId (environment stackM) of
-                        Just val     -> return $ Right $ pushSM stackM val
-                        Nothing      -> return $ Left $ IdNotFound sId
-    (Lvalue sId)    -> return $ Right $ pushSM stackM (Id sId)
-    Assign          -> case state stackM of
-                        (Id name : cont : xs) 
-                            | not $ isLvalue cont -> let newEnv = M.insert name cont (environment stackM) 
-                                                     in return $ Right $ stackM { environment = newEnv, state = xs } 
-                            | otherwise           -> return $ Left $ InvalidRValue (show cont)
-                        ( a : _ : _ )         -> return $ Left $ InvalidLValue (show a)
-                        _                     -> return $ Left EmptyState
-    (Goto label)    -> case M.lookup label (labels stackM) of
-                        Just startPoint -> do
-                                let instrSize  = length (ledge stackM) - startPoint + 1
-                                    instrBlock = reverse $ take startPoint (ledge stackM)
-                                foldWithInstructions stackM instrBlock
-                        Nothing      -> return $ Left $ LabelNotFound label
-    (GoTrue label)  -> case state stackM of
-                        (Bool True : _) -> performInstruction stackM (Goto label)
-                        (a : _ )        -> return $ Left $ InvalidTopForJump True (show a)
-                        []              -> return $ Left EmptyState
-    (GoFalse label) ->  case state stackM of
-                        (Bool False : _) -> performInstruction stackM (Goto label)
-                        (a : _ )         -> return $ Left $ InvalidTopForJump True (show a)
-                        []               -> return $ Left EmptyState
-    (Read idS)      -> do
-        input <- request idRequest
-        if isBool input 
-            then return $ Right $ insertId stackM idS (Bool (read input :: Bool)) 
-            else if isNum input 
-                then return $ Right $ insertId stackM idS (Int (read input :: Int)) 
-                else return $ Left $ InvalidInput idS
-    (Print idS)     -> do
-        case M.lookup idS (environment stackM) of
-            Just val -> print val >> return (Right stackM)
-            Nothing  -> return $ Left $ IdNotFound idS
+performInstruction :: StackMachine -> Instruction -> IO StackMachine
+performInstruction stackM instruction = do 
+    displayCurrentState instruction stackM
+    case instruction of
+     Push val        -> return $ pushSM stackM val
+     Pop             -> performOperation stackM pop
+     Add             -> performOperation stackM add
+     Sub             -> performOperation stackM sub
+     Mul             -> performOperation stackM mul
+     Div             -> performOperation stackM divS
+     And             -> performOperation stackM andS
+     Or              -> performOperation stackM orS
+     Lt              -> performOperation stackM lt
+     Le              -> performOperation stackM le
+     Gt              -> performOperation stackM gt
+     Ge              -> performOperation stackM ge
+     Eq              -> performOperation stackM eq
+     Neq             -> performOperation stackM neq
+     Uminus          -> performOperation stackM uminus
+     Not             -> performOperation stackM notS
+     (Rvalue sId)    -> case M.lookup sId (environment stackM) of
+                         Just val     -> return $ pushSM stackM val
+                         Nothing      -> reportError (IdNotFound sId) >> return stackM
+     (Lvalue sId)    -> return $ pushSM stackM (Id sId)
+     Assign          -> case state stackM of
+                         (cont : Id name : xs) 
+                             | not $ isLvalue cont -> let newEnv = M.insert name cont (environment stackM) 
+                                                      in return $ stackM { environment = newEnv, state = xs } 
+                             | otherwise           -> reportError (InvalidRValue (show cont)) >> return stackM
+                         ( a : _ : _ )         -> reportError (InvalidLValue (show a)) >> return stackM
+                         _                     -> reportError IncompleteState >> return stackM
+     (Goto label)    -> case M.lookup label (labels stackM) of
+                         Just startPoint -> do
+                                 let instrSize  = length (ledge stackM) - startPoint + 1
+                                     instrBlock = reverse $ take instrSize (ledge stackM)
+                                 -- foldWithInstructions stackM instrBlock
+                                 foldM performInstruction stackM instrBlock
+                         Nothing        -> reportError (LabelNotFound label) >> return stackM
+     (GoTrue label)  -> case state stackM of
+                         (Bool b : _) -> let newStackM = popSM stackM 
+                                         in if b 
+                                             then performInstruction newStackM (Goto label)
+                                             else return $ newStackM
+                         (a : _ )     -> reportError(InvalidTopForJump True (show a)) >> return stackM
+                         []           -> reportError IncompleteState >> return stackM
+     (GoFalse label) ->  case state stackM of
+                         (Bool b: _) -> let newStackM = popSM stackM 
+                                        in if not b
+                                             then performInstruction newStackM (Goto label)
+                                             else return newStackM
+                         (a : _ )    -> reportError (InvalidTopForJump True (show a)) >> return stackM
+                         []          -> reportError IncompleteState >> return stackM
+     (Read idS)      -> do
+         input <- request idRequest
+         if isBool input 
+             then let arg = read (toHaskellBool input) :: Bool 
+                  in return $ insertId stackM idS (Bool arg) 
+             else if isNum input 
+                 then let arg = read input :: Int
+                      in return $ insertId stackM idS (Int arg) 
+                 else reportError (InvalidInput idS) >> return stackM
+     (Print idS)     -> do
+         case M.lookup idS (environment stackM) of
+             Just val -> print val >> return stackM
+             Nothing  -> reportError (IdNotFound idS) >> return stackM
+     Exit            -> do
+                         putStrLn exitMessage
+                         putStrLn (show stackM)
+                         exitSuccess
 
-foldWithInstructions :: StackMachine -> [Instruction] -> IO (Either Error StackMachine)
-foldWithInstructions stackM = foldl' foo (return $ Right stackM)
-    where
-        foo acc b = do
-            extracted <- acc 
-            case extracted of 
-                Left err        -> return $ Left err 
-                Right newStackM -> performInstruction newStackM b
+
+displayCurrentState :: Instruction -> StackMachine -> IO ()
+displayCurrentState instruction stackM = putStrLn goodDisplay
+    where 
+        goodDisplay = arrow ++ show instruction ++ alignColumn ++ "stack: "++ stackState
+        arrow = "--> " 
+        alignColumn = "\ESC[25G" 
+        stackState = show $ state stackM
+
+reportError :: Error -> IO ()
+reportError err = warning (show err)
 
 {- Helpers -}
 
