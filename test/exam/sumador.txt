@@ -1,0 +1,14 @@
+PUSH 0
+LVALUE result
+ASSIGN
+loop: READ continue
+RVALUE continue
+GOFALSE end
+READ next
+RVALUE result
+RVALUE next
+ADD
+LVALUE result
+ASSIGN
+GOTO loop
+end: PRINT result
