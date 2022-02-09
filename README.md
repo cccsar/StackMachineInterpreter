@@ -1,6 +1,6 @@
 # stack-machine-interpreter 
 
-Stack machine interpreter for CI-4721 course
+Stack machine interpreter for *Programming languages* - CI4721 subject.
 
 ---
 
